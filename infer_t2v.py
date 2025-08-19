@@ -6,18 +6,17 @@ import numpy as np
 from tqdm import tqdm
 import random
 random.seed(42)
+from PIL import Image
+import decord
 
 def worker(rank, gpu_id, video_paths_chunk, configs):
     import torch
     from diffsynth import ModelManager, WanVideoPipeline, save_video
-    from PIL import Image
-    import decord
-    import numpy as np
 
     # os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     # device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    model_manager = ModelManager(device="cpu") # 1.3b: device=cpu(先加载到cpu上): 占6G显存, device=device: 占16G显存
+    model_manager = ModelManager(device="cpu") # 1.3B: device=cpu(先加载到cpu上): 占6G显存, device=device: 占16G显存
     # 14B: 会借用0卡加载参数, 之后再到各卡上推理, 约占36G, 一个视频约10min
     device = f'cuda:{gpu_id}' if torch.cuda.is_available() else 'cpu'
     if 'wan14b' in configs['save_dir_path']:
@@ -119,13 +118,13 @@ def worker(rank, gpu_id, video_paths_chunk, configs):
         
         save_dir_path = os.path.join(configs['save_dir_path'], video_dir.split('/')[-1])
         os.makedirs(save_dir_path, exist_ok=True)
+        
         save_path = os.path.join(save_dir_path, video_name)
-        video_i = configs['select_indices'][i] + i
+        video_i = configs['select_indices'][rank] + i
         # save_path = os.path.join(save_dir_path, f'{video_i+1:03d}.mp4')
         
         if os.path.exists(save_path): continue
         
-        fg_v_pil = [Image.fromarray(fg_v[k]) for k in range(num_frames)]
         prompt = configs['prompts'][ video_i % len(configs['prompts']) ]
 
         video = pipe(
@@ -133,25 +132,22 @@ def worker(rank, gpu_id, video_paths_chunk, configs):
             # negative_prompt = 'Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards',
             negative_prompt = '色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走',
             num_inference_steps = 50, 
-            control_video=fg_v_pil,
+            control_video=fg_v,
             height=height, width=width, num_frames=num_frames,
             seed=-1, tiled=True,
-
-            with_clip_feature = configs['with_clip_feature'],
-            cond_latents2 = None,
-            more_config = None,
         )
 
-        # concat_video = concatenate_images_horizontally([ori_v, video])
-        save_video(video, save_path, fps=16, quality=7)
+        concat_video = concatenate_images_horizontally([ori_v, video])
+        save_video(concat_video, save_path, fps=16, quality=7)
+        # save_video(video, save_path, fps=16, quality=7)
 
 
 def main(): # python infer_t2v.py
-    gpu_ids = [ 0, 1, 2, 3, 4, 5, 6, 7 ]
+    gpu_ids = [ 0,1,2,3, 4,5,6,7 ]
     # gpu_ids = [ 3 ]
 
     # wan_dit_path = None
-    wan_dit_path = 'ckpt/Lumen/Lumen-T2V-1.3B.ckpt'
+    wan_dit_path = 'ckpt/Lumen/Lumen-T2V-1.3B-V1.0.ckpt'
     save_dir_path = 'test_res/wan1.3b/'
     lora_path = None
     lora_alpha = 0
@@ -161,8 +157,6 @@ def main(): # python infer_t2v.py
     # lora_path = 'train_res/wan14b/...'
     # save_dir_path = 'test_res/wan14b/...'
 
-    # 使用输入的第一帧的特征作为clip_feature, 有助于保持前景id一致
-    with_clip_feature = False if '_woc' in save_dir_path.split('/')[-1] else True
     
     # 若wan_dit_path为list, 加载其中所有.safetensors文件路径为list
     if wan_dit_path and os.path.isdir(wan_dit_path):
@@ -174,37 +168,26 @@ def main(): # python infer_t2v.py
     mask_dir_path = 'test/pachong_test/video_rmbg_msk/single'
     # video_paths = [os.path.join(video_dir_path, f) for f in os.listdir(video_dir_path) ]
     video_names = [ 191947, 922930, 1217498, 1302135, 1371894, 
-                   1628805, 1873403, 2080723, 2259812, 2445920, 
-                   2639840, 2779867, 2974076 ] # 13
-    video_names1 = []
-    for video_name in video_names:
-        video_names1.extend([video_name] * 2)
-    video_names = video_names1
+                    1628805, 1873403, 2080723, 2259812, 2445920, 
+                    2639840, 2779867, 2974076 ] # 13
+    video_names = video_names * 2
     video_paths = [ os.path.join(video_dir_path, f'{name}.mp4') for name in video_names ]
     
-    video_paths.sort()
-    # video_paths = video_paths[:len(gpu_ids)*2]
     print('len(video_paths):', len(video_paths))
 
     num_frames, height, width = 49, 480, 832
-    # num_frames, height, width = 16+1, 512, 512
 
-    bg_prompt_path = 'my_data/zh_short_prompts.txt' # zh_bg_prompt1 zh_bg_prompt3
+    bg_prompt_path = 'my_data/zh_en_short_prompts.txt'
 
     with open(bg_prompt_path, 'r') as f:
         bg_prompts = f.readlines()
     prompts = [bg.strip() for bg in bg_prompts if bg.strip()]  # 去除空行
-    prompts = prompts[ : len(prompts) // 2 ] # 26
+    prompts = prompts[ : 26 ] # len(prompts) // 2 = 26
 
-    # bg_prompts1 = []
-    # for bg_prompt in bg_prompts:
-    #     bg_prompts1.extend([bg_prompt] * 5)
-    # bg_prompts = bg_prompts1
-    prompts = bg_prompts
-    print(f"Loaded {len(prompts)} background prompts from {bg_prompt_path}")
+    print(f"Loaded *{len(prompts)}* background prompts from {bg_prompt_path}")
 
     num_gpus = len(gpu_ids)
-    # 更合理均匀的分配方式: 在video_paths里尽可能均匀选取num_gpus-1个中间位置, 作为分割点
+    # 在video_paths里尽可能均匀选取num_gpus-1个中间位置, 作为分割点
     select_indices = np.linspace(0, len(video_paths), num_gpus+1, dtype=int)
     v2_chunks = [video_paths[select_indices[i]:select_indices[i+1]] for i in range(num_gpus)]
 
@@ -220,7 +203,6 @@ def main(): # python infer_t2v.py
         'mask_dir_path': mask_dir_path,
         'save_dir_path': save_dir_path,
         'prompts': prompts,
-        'with_clip_feature': with_clip_feature,
     }
 
     mp.set_start_method('spawn', force=True)

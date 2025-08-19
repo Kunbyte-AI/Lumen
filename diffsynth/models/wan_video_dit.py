@@ -36,6 +36,8 @@ def flash_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, num_heads
         k = rearrange(k, "b s (n d) -> b s n d", n=num_heads)
         v = rearrange(v, "b s (n d) -> b s n d", n=num_heads)
         x = flash_attn_interface.flash_attn_func(q, k, v)
+        if isinstance(x,tuple):
+            x = x[0]
         x = rearrange(x, "b s n d -> b s (n d)", n=num_heads)
     elif FLASH_ATTN_2_AVAILABLE:
         q = rearrange(q, "b s (n d) -> b s n d", n=num_heads)
@@ -129,7 +131,6 @@ class SelfAttention(nn.Module):
         self.k = nn.Linear(dim, dim)
         self.v = nn.Linear(dim, dim)
         self.o = nn.Linear(dim, dim)
-        
         self.norm_q = RMSNorm(dim, eps=eps)
         self.norm_k = RMSNorm(dim, eps=eps)
         
@@ -156,7 +157,6 @@ class CrossAttention(nn.Module):
         self.k = nn.Linear(dim, dim)
         self.v = nn.Linear(dim, dim)
         self.o = nn.Linear(dim, dim)
-
         self.norm_q = RMSNorm(dim, eps=eps)
         self.norm_k = RMSNorm(dim, eps=eps)
         self.has_image_input = has_image_input
@@ -207,7 +207,6 @@ class DiTBlock(nn.Module):
         self.norm3 = nn.LayerNorm(dim, eps=eps)
         self.ffn = nn.Sequential(nn.Linear(dim, ffn_dim), nn.GELU(
             approximate='tanh'), nn.Linear(ffn_dim, dim))
-        
         self.modulation = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
         self.gate = GateModule()
 
@@ -224,7 +223,7 @@ class DiTBlock(nn.Module):
 
 
 class MLP(torch.nn.Module):
-    def __init__(self, in_dim, out_dim):
+    def __init__(self, in_dim, out_dim, has_pos_emb=False):
         super().__init__()
         self.proj = torch.nn.Sequential(
             nn.LayerNorm(in_dim),
@@ -233,8 +232,13 @@ class MLP(torch.nn.Module):
             nn.Linear(in_dim, out_dim),
             nn.LayerNorm(out_dim)
         )
+        self.has_pos_emb = has_pos_emb
+        if has_pos_emb:
+            self.emb_pos = torch.nn.Parameter(torch.zeros((1, 514, 1280)))
 
     def forward(self, x):
+        if self.has_pos_emb:
+            x = x + self.emb_pos.to(dtype=x.dtype, device=x.device)
         return self.proj(x)
 
 
@@ -267,6 +271,8 @@ class WanModel(torch.nn.Module):
         num_heads: int,
         num_layers: int,
         has_image_input: bool,
+        has_image_pos_emb: bool = False,
+        has_ref_conv: bool = False,
     ):
         super().__init__()
         self.dim = dim
@@ -276,7 +282,6 @@ class WanModel(torch.nn.Module):
 
         self.patch_embedding = nn.Conv3d(
             in_dim, dim, kernel_size=patch_size, stride=patch_size)
-
         self.text_embedding = nn.Sequential(
             nn.Linear(text_dim, dim),
             nn.GELU(approximate='tanh'),
@@ -298,7 +303,11 @@ class WanModel(torch.nn.Module):
         self.freqs = precompute_freqs_cis_3d(head_dim)
 
         if has_image_input:
-            self.img_emb = MLP(1280, dim)  # clip_feature_dim = 1280
+            self.img_emb = MLP(1280, dim, has_pos_emb=has_image_pos_emb)  # clip_feature_dim = 1280
+        if has_ref_conv:
+            self.ref_conv = nn.Conv2d(16, dim, kernel_size=(2, 2), stride=(2, 2))
+        self.has_image_pos_emb = has_image_pos_emb
+        self.has_ref_conv = has_ref_conv
 
     def patchify(self, x: torch.Tensor):
         x = self.patch_embedding(x)
@@ -455,6 +464,7 @@ class WanModelStateDictConverter:
         return state_dict_, config
     
     def from_civitai(self, state_dict):
+        state_dict = {name: param for name, param in state_dict.items() if not name.startswith("vace")}
         if hash_state_dict_keys(state_dict) == "9269f8db9040a9d860eaca435be61814":
             config = {
                 "has_image_input": False,
@@ -526,6 +536,7 @@ class WanModelStateDictConverter:
                 "eps": 1e-6
             }
         elif hash_state_dict_keys(state_dict) == "349723183fc063b2bfc10bb2835cf677":
+            # 1.3B PAI control
             config = {
                 "has_image_input": True,
                 "patch_size": [1, 2, 2],
@@ -540,6 +551,7 @@ class WanModelStateDictConverter:
                 "eps": 1e-6
             }
         elif hash_state_dict_keys(state_dict) == "efa44cddf936c70abd0ea28b6cbe946c":
+            # 14B PAI control
             config = {
                 "has_image_input": True,
                 "patch_size": [1, 2, 2],
@@ -552,6 +564,53 @@ class WanModelStateDictConverter:
                 "num_heads": 40,
                 "num_layers": 40,
                 "eps": 1e-6
+            }
+        elif hash_state_dict_keys(state_dict) == "3ef3b1f8e1dab83d5b71fd7b617f859f":
+            config = {
+                "has_image_input": True,
+                "patch_size": [1, 2, 2],
+                "in_dim": 36,
+                "dim": 5120,
+                "ffn_dim": 13824,
+                "freq_dim": 256,
+                "text_dim": 4096,
+                "out_dim": 16,
+                "num_heads": 40,
+                "num_layers": 40,
+                "eps": 1e-6,
+                "has_image_pos_emb": True
+            }
+        elif hash_state_dict_keys(state_dict) == "70ddad9d3a133785da5ea371aae09504":
+            # 1.3B PAI control v1.1
+            config = {
+                "has_image_input": True,
+                "patch_size": [1, 2, 2],
+                "in_dim": 48,
+                "dim": 1536,
+                "ffn_dim": 8960,
+                "freq_dim": 256,
+                "text_dim": 4096,
+                "out_dim": 16,
+                "num_heads": 12,
+                "num_layers": 30,
+                "eps": 1e-6,
+                "has_ref_conv": True
+            }
+        elif hash_state_dict_keys(state_dict) == "26bde73488a92e64cc20b0a7485b9e5b":
+            # 14B PAI control v1.1
+            config = {
+                "has_image_input": True,
+                "patch_size": [1, 2, 2],
+                "in_dim": 48,
+                "dim": 5120,
+                "ffn_dim": 13824,
+                "freq_dim": 256,
+                "text_dim": 4096,
+                "out_dim": 16,
+                "num_heads": 40,
+                "num_layers": 40,
+                "eps": 1e-6,
+                "has_ref_conv": True
             }
         else:
             config = {}

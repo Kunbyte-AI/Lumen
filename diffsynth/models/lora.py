@@ -246,7 +246,7 @@ class GeneralLoRAFromPeft:
     def load(self, model, state_dict_lora, lora_prefix="", alpha=1.0, model_resource=""):
         state_dict_model = model.state_dict()
         device, dtype, computation_device, computation_dtype = self.fetch_device_and_dtype(state_dict_model)
-        lora_name_dict = self.get_name_dict(state_dict_lora)        
+        lora_name_dict = self.get_name_dict(state_dict_lora)
         for name in lora_name_dict:
             weight_up = state_dict_lora[lora_name_dict[name][0]].to(device=computation_device, dtype=computation_dtype)
             weight_down = state_dict_lora[lora_name_dict[name][1]].to(device=computation_device, dtype=computation_dtype)
@@ -255,12 +255,15 @@ class GeneralLoRAFromPeft:
                 weight_up = weight_up.squeeze(3).squeeze(2)
                 weight_down = weight_down.squeeze(3).squeeze(2)
                 weight_lora = alpha * torch.mm(weight_up, weight_down).unsqueeze(2).unsqueeze(3)
+            
+            #* Yuxuan: 增加3D卷积
             elif len(weight_up.shape) == 5:
                 weight_up = weight_up.squeeze(4).squeeze(3).squeeze(2)
                 _, down_1, down_2, down_3, down_4 = weight_down.shape
                 weight_down = weight_down.view(weight_down.shape[0], -1)
                 weight_lora = alpha * torch.mm(weight_up, weight_down)
                 weight_lora = weight_lora.view(weight_lora.shape[0], down_1, down_2, down_3, down_4)
+            
             else:
                 # print(name, alpha, weight_up.shape, weight_down.shape)
                 weight_lora = alpha * torch.mm(weight_up, weight_down)

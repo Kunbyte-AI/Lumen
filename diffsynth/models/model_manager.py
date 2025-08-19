@@ -423,7 +423,6 @@ class ModelManager:
 
     def load_models(self, file_path_list, model_names=None, device=None, torch_dtype=None):
         for file_path in file_path_list:
-            print('>>>>', file_path)
             self.load_model(file_path, model_names, device=device, torch_dtype=torch_dtype)
 
     

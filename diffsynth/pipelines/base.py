@@ -29,11 +29,11 @@ class BasePipeline(torch.nn.Module):
 
     def preprocess_image(self, image):
         image = torch.Tensor(np.array(image, dtype=np.float32) * (2 / 255) - 1).permute(2, 0, 1).unsqueeze(0)
-        return image # 1,c,h,w ?
+        return image # 1,c,h,w [-1,1]
     
 
     def preprocess_images(self, images):
-        return [self.preprocess_image(image) for image in images] # num,1,c,h,w ?
+        return [self.preprocess_image(image) for image in images] # num,1,c,h,w
     
 
     def vae_output_to_image(self, vae_output):

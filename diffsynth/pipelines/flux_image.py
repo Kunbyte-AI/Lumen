@@ -1,4 +1,5 @@
 from ..models import ModelManager, FluxDiT, SD3TextEncoder1, FluxTextEncoder2, FluxVAEDecoder, FluxVAEEncoder, FluxIpAdapter
+from ..models.step1x_connector import Qwen2Connector
 from ..controlnets import FluxMultiControlNetManager, ControlNetUnit, ControlNetConfigUnit, Annotator
 from ..prompters import FluxPrompter
 from ..schedulers import FlowMatchScheduler
@@ -32,105 +33,112 @@ class FluxImagePipeline(BasePipeline):
         self.ipadapter: FluxIpAdapter = None
         self.ipadapter_image_encoder: SiglipVisionModel = None
         self.infinityou_processor: InfinitYou = None
-        self.model_names = ['text_encoder_1', 'text_encoder_2', 'dit', 'vae_decoder', 'vae_encoder', 'controlnet', 'ipadapter', 'ipadapter_image_encoder']
+        self.qwenvl = None
+        self.step1x_connector: Qwen2Connector = None
+        self.model_names = ['text_encoder_1', 'text_encoder_2', 'dit', 'vae_decoder', 'vae_encoder', 'controlnet', 'ipadapter', 'ipadapter_image_encoder', 'qwenvl', 'step1x_connector']
 
 
     def enable_vram_management(self, num_persistent_param_in_dit=None):
-        dtype = next(iter(self.text_encoder_1.parameters())).dtype
-        enable_vram_management(
-            self.text_encoder_1,
-            module_map = {
-                torch.nn.Linear: AutoWrappedLinear,
-                torch.nn.Embedding: AutoWrappedModule,
-                torch.nn.LayerNorm: AutoWrappedModule,
-            },
-            module_config = dict(
-                offload_dtype=dtype,
-                offload_device="cpu",
-                onload_dtype=dtype,
-                onload_device="cpu",
-                computation_dtype=self.torch_dtype,
-                computation_device=self.device,
-            ),
-        )
-        dtype = next(iter(self.text_encoder_2.parameters())).dtype
-        enable_vram_management(
-            self.text_encoder_2,
-            module_map = {
-                torch.nn.Linear: AutoWrappedLinear,
-                torch.nn.Embedding: AutoWrappedModule,
-                T5LayerNorm: AutoWrappedModule,
-                T5DenseActDense: AutoWrappedModule,
-                T5DenseGatedActDense: AutoWrappedModule,
-            },
-            module_config = dict(
-                offload_dtype=dtype,
-                offload_device="cpu",
-                onload_dtype=dtype,
-                onload_device="cpu",
-                computation_dtype=self.torch_dtype,
-                computation_device=self.device,
-            ),
-        )
-        dtype = next(iter(self.dit.parameters())).dtype
-        enable_vram_management(
-            self.dit,
-            module_map = {
-                RMSNorm: AutoWrappedModule,
-                torch.nn.Linear: AutoWrappedLinear,
-            },
-            module_config = dict(
-                offload_dtype=dtype,
-                offload_device="cpu",
-                onload_dtype=dtype,
-                onload_device="cuda",
-                computation_dtype=self.torch_dtype,
-                computation_device=self.device,
-            ),
-            max_num_param=num_persistent_param_in_dit,
-            overflow_module_config = dict(
-                offload_dtype=dtype,
-                offload_device="cpu",
-                onload_dtype=dtype,
-                onload_device="cpu",
-                computation_dtype=self.torch_dtype,
-                computation_device=self.device,
-            ),
-        )
-        dtype = next(iter(self.vae_decoder.parameters())).dtype
-        enable_vram_management(
-            self.vae_decoder,
-            module_map = {
-                torch.nn.Linear: AutoWrappedLinear,
-                torch.nn.Conv2d: AutoWrappedModule,
-                torch.nn.GroupNorm: AutoWrappedModule,
-            },
-            module_config = dict(
-                offload_dtype=dtype,
-                offload_device="cpu",
-                onload_dtype=dtype,
-                onload_device="cpu",
-                computation_dtype=self.torch_dtype,
-                computation_device=self.device,
-            ),
-        )
-        dtype = next(iter(self.vae_encoder.parameters())).dtype
-        enable_vram_management(
-            self.vae_encoder,
-            module_map = {
-                torch.nn.Linear: AutoWrappedLinear,
-                torch.nn.Conv2d: AutoWrappedModule,
-                torch.nn.GroupNorm: AutoWrappedModule,
-            },
-            module_config = dict(
-                offload_dtype=dtype,
-                offload_device="cpu",
-                onload_dtype=dtype,
-                onload_device="cpu",
-                computation_dtype=self.torch_dtype,
-                computation_device=self.device,
-            ),
-        )
+        if self.text_encoder_1 is not None:
+            dtype = next(iter(self.text_encoder_1.parameters())).dtype
+            enable_vram_management(
+                self.text_encoder_1,
+                module_map = {
+                    torch.nn.Linear: AutoWrappedLinear,
+                    torch.nn.Embedding: AutoWrappedModule,
+                    torch.nn.LayerNorm: AutoWrappedModule,
+                },
+                module_config = dict(
+                    offload_dtype=dtype,
+                    offload_device="cpu",
+                    onload_dtype=dtype,
+                    onload_device="cpu",
+                    computation_dtype=self.torch_dtype,
+                    computation_device=self.device,
+                ),
+            )
+        if self.text_encoder_2 is not None:
+            dtype = next(iter(self.text_encoder_2.parameters())).dtype
+            enable_vram_management(
+                self.text_encoder_2,
+                module_map = {
+                    torch.nn.Linear: AutoWrappedLinear,
+                    torch.nn.Embedding: AutoWrappedModule,
+                    T5LayerNorm: AutoWrappedModule,
+                    T5DenseActDense: AutoWrappedModule,
+                    T5DenseGatedActDense: AutoWrappedModule,
+                },
+                module_config = dict(
+                    offload_dtype=dtype,
+                    offload_device="cpu",
+                    onload_dtype=dtype,
+                    onload_device="cpu",
+                    computation_dtype=self.torch_dtype,
+                    computation_device=self.device,
+                ),
+            )
+        if self.dit is not None:
+            dtype = next(iter(self.dit.parameters())).dtype
+            enable_vram_management(
+                self.dit,
+                module_map = {
+                    RMSNorm: AutoWrappedModule,
+                    torch.nn.Linear: AutoWrappedLinear,
+                },
+                module_config = dict(
+                    offload_dtype=dtype,
+                    offload_device="cpu",
+                    onload_dtype=dtype,
+                    onload_device="cuda",
+                    computation_dtype=self.torch_dtype,
+                    computation_device=self.device,
+                ),
+                max_num_param=num_persistent_param_in_dit,
+                overflow_module_config = dict(
+                    offload_dtype=dtype,
+                    offload_device="cpu",
+                    onload_dtype=dtype,
+                    onload_device="cpu",
+                    computation_dtype=self.torch_dtype,
+                    computation_device=self.device,
+                ),
+            )
+        if self.vae_decoder is not None:
+            dtype = next(iter(self.vae_decoder.parameters())).dtype
+            enable_vram_management(
+                self.vae_decoder,
+                module_map = {
+                    torch.nn.Linear: AutoWrappedLinear,
+                    torch.nn.Conv2d: AutoWrappedModule,
+                    torch.nn.GroupNorm: AutoWrappedModule,
+                },
+                module_config = dict(
+                    offload_dtype=dtype,
+                    offload_device="cpu",
+                    onload_dtype=dtype,
+                    onload_device="cpu",
+                    computation_dtype=self.torch_dtype,
+                    computation_device=self.device,
+                ),
+            )
+        if self.vae_encoder is not None:
+            dtype = next(iter(self.vae_encoder.parameters())).dtype
+            enable_vram_management(
+                self.vae_encoder,
+                module_map = {
+                    torch.nn.Linear: AutoWrappedLinear,
+                    torch.nn.Conv2d: AutoWrappedModule,
+                    torch.nn.GroupNorm: AutoWrappedModule,
+                },
+                module_config = dict(
+                    offload_dtype=dtype,
+                    offload_device="cpu",
+                    onload_dtype=dtype,
+                    onload_device="cpu",
+                    computation_dtype=self.torch_dtype,
+                    computation_device=self.device,
+                ),
+            )
         self.enable_cpu_offload()
 
 
@@ -167,6 +175,10 @@ class FluxImagePipeline(BasePipeline):
         self.image_proj_model = model_manager.fetch_model("infiniteyou_image_projector")
         if self.image_proj_model is not None:
             self.infinityou_processor = InfinitYou(device=self.device)
+            
+        # Step1x
+        self.qwenvl = model_manager.fetch_model("qwenvl")
+        self.step1x_connector = model_manager.fetch_model("step1x_connector")
 
 
     @staticmethod
@@ -191,10 +203,13 @@ class FluxImagePipeline(BasePipeline):
     
 
     def encode_prompt(self, prompt, positive=True, t5_sequence_length=512):
-        prompt_emb, pooled_prompt_emb, text_ids = self.prompter.encode_prompt(
-            prompt, device=self.device, positive=positive, t5_sequence_length=t5_sequence_length
-        )
-        return {"prompt_emb": prompt_emb, "pooled_prompt_emb": pooled_prompt_emb, "text_ids": text_ids}
+        if self.text_encoder_1 is not None and self.text_encoder_2 is not None:
+            prompt_emb, pooled_prompt_emb, text_ids = self.prompter.encode_prompt(
+                prompt, device=self.device, positive=positive, t5_sequence_length=t5_sequence_length
+            )
+            return {"prompt_emb": prompt_emb, "pooled_prompt_emb": pooled_prompt_emb, "text_ids": text_ids}
+        else:
+            return {}
     
 
     def prepare_extra_input(self, latents=None, guidance=1.0):
@@ -360,6 +375,46 @@ class FluxImagePipeline(BasePipeline):
             return self.infinityou_processor.prepare_infinite_you(self.image_proj_model, id_image, controlnet_image, infinityou_guidance, height, width)
         else:
             return {}, controlnet_image
+        
+        
+    def prepare_flex_kwargs(self, latents, flex_inpaint_image=None, flex_inpaint_mask=None, flex_control_image=None, flex_control_strength=0.5, flex_control_stop=0.5, tiled=False, tile_size=64, tile_stride=32):
+        if self.dit.input_dim == 196:
+            if flex_inpaint_image is None:
+                flex_inpaint_image = torch.zeros_like(latents)
+            else:
+                flex_inpaint_image = self.preprocess_image(flex_inpaint_image).to(device=self.device, dtype=self.torch_dtype)
+                flex_inpaint_image = self.encode_image(flex_inpaint_image, tiled=tiled, tile_size=tile_size, tile_stride=tile_stride)
+            if flex_inpaint_mask is None:
+                flex_inpaint_mask = torch.ones_like(latents)[:, 0:1, :, :]
+            else:
+                flex_inpaint_mask = flex_inpaint_mask.resize((latents.shape[3], latents.shape[2]))
+                flex_inpaint_mask = self.preprocess_image(flex_inpaint_mask).to(device=self.device, dtype=self.torch_dtype)
+                flex_inpaint_mask = (flex_inpaint_mask[:, 0:1, :, :] + 1) / 2
+            flex_inpaint_image = flex_inpaint_image * (1 - flex_inpaint_mask)
+            if flex_control_image is None:
+                flex_control_image = torch.zeros_like(latents)
+            else:
+                flex_control_image = self.preprocess_image(flex_control_image).to(device=self.device, dtype=self.torch_dtype)
+                flex_control_image = self.encode_image(flex_control_image, tiled=tiled, tile_size=tile_size, tile_stride=tile_stride) * flex_control_strength
+            flex_condition = torch.concat([flex_inpaint_image, flex_inpaint_mask, flex_control_image], dim=1)
+            flex_uncondition = torch.concat([flex_inpaint_image, flex_inpaint_mask, torch.zeros_like(flex_control_image)], dim=1)
+            flex_control_stop_timestep = self.scheduler.timesteps[int(flex_control_stop * (len(self.scheduler.timesteps) - 1))]
+            flex_kwargs = {"flex_condition": flex_condition, "flex_uncondition": flex_uncondition, "flex_control_stop_timestep": flex_control_stop_timestep}
+        else:
+            flex_kwargs = {}
+        return flex_kwargs
+    
+    
+    def prepare_step1x_kwargs(self, prompt, negative_prompt, image):
+        if image is None:
+            return {}, {}
+        self.load_models_to_device(["qwenvl", "vae_encoder"])
+        captions = [prompt, negative_prompt]
+        ref_images = [image, image]
+        embs, masks = self.qwenvl(captions, ref_images)
+        image = self.preprocess_image(image).to(device=self.device, dtype=self.torch_dtype)
+        image = self.encode_image(image)
+        return {"step1x_llm_embedding": embs[0:1], "step1x_mask": masks[0:1], "step1x_reference_latents": image}, {"step1x_llm_embedding": embs[1:2], "step1x_mask": masks[1:2], "step1x_reference_latents": image}
 
 
     @torch.no_grad()
@@ -398,6 +453,14 @@ class FluxImagePipeline(BasePipeline):
         # InfiniteYou
         infinityou_id_image=None,
         infinityou_guidance=1.0,
+        # Flex
+        flex_inpaint_image=None,
+        flex_inpaint_mask=None,
+        flex_control_image=None,
+        flex_control_strength=0.5,
+        flex_control_stop=0.5,
+        # Step1x
+        step1x_reference_image=None,
         # TeaCache
         tea_cache_l1_thresh=None,
         # Tile
@@ -436,20 +499,26 @@ class FluxImagePipeline(BasePipeline):
 
         # ControlNets
         controlnet_kwargs_posi, controlnet_kwargs_nega, local_controlnet_kwargs = self.prepare_controlnet(controlnet_image, masks, controlnet_inpaint_mask, tiler_kwargs, enable_controlnet_on_negative)
+        
+        # Flex
+        flex_kwargs = self.prepare_flex_kwargs(latents, flex_inpaint_image, flex_inpaint_mask, flex_control_image, flex_control_strength=flex_control_strength, flex_control_stop=flex_control_stop, **tiler_kwargs)
+        
+        # Step1x
+        step1x_kwargs_posi, step1x_kwargs_nega = self.prepare_step1x_kwargs(prompt, negative_prompt, image=step1x_reference_image)
 
         # TeaCache
         tea_cache_kwargs = {"tea_cache": TeaCache(num_inference_steps, rel_l1_thresh=tea_cache_l1_thresh) if tea_cache_l1_thresh is not None else None}
 
         # Denoise
-        self.load_models_to_device(['dit', 'controlnet'])
+        self.load_models_to_device(['dit', 'controlnet', 'step1x_connector'])
         for progress_id, timestep in enumerate(progress_bar_cmd(self.scheduler.timesteps)):
             timestep = timestep.unsqueeze(0).to(self.device)
 
             # Positive side
             inference_callback = lambda prompt_emb_posi, controlnet_kwargs: lets_dance_flux(
-                dit=self.dit, controlnet=self.controlnet,
+                dit=self.dit, controlnet=self.controlnet, step1x_connector=self.step1x_connector,
                 hidden_states=latents, timestep=timestep,
-                **prompt_emb_posi, **tiler_kwargs, **extra_input, **controlnet_kwargs, **ipadapter_kwargs_list_posi, **eligen_kwargs_posi, **tea_cache_kwargs, **infiniteyou_kwargs
+                **prompt_emb_posi, **tiler_kwargs, **extra_input, **controlnet_kwargs, **ipadapter_kwargs_list_posi, **eligen_kwargs_posi, **tea_cache_kwargs, **infiniteyou_kwargs, **flex_kwargs, **step1x_kwargs_posi,
             )
             noise_pred_posi = self.control_noise_via_local_prompts(
                 prompt_emb_posi, prompt_emb_locals, masks, mask_scales, inference_callback,
@@ -464,9 +533,9 @@ class FluxImagePipeline(BasePipeline):
             if cfg_scale != 1.0:
                 # Negative side
                 noise_pred_nega = lets_dance_flux(
-                    dit=self.dit, controlnet=self.controlnet,
+                    dit=self.dit, controlnet=self.controlnet, step1x_connector=self.step1x_connector,
                     hidden_states=latents, timestep=timestep,
-                    **prompt_emb_nega, **tiler_kwargs, **extra_input, **controlnet_kwargs_nega, **ipadapter_kwargs_list_nega, **eligen_kwargs_nega, **infiniteyou_kwargs,
+                    **prompt_emb_nega, **tiler_kwargs, **extra_input, **controlnet_kwargs_nega, **ipadapter_kwargs_list_nega, **eligen_kwargs_nega, **infiniteyou_kwargs, **flex_kwargs, **step1x_kwargs_nega,
                 )
                 noise_pred = noise_pred_nega + cfg_scale * (noise_pred_posi - noise_pred_nega)
             else:
@@ -586,6 +655,7 @@ class TeaCache:
 def lets_dance_flux(
     dit: FluxDiT,
     controlnet: FluxMultiControlNetManager = None,
+    step1x_connector: Qwen2Connector = None,
     hidden_states=None,
     timestep=None,
     prompt_emb=None,
@@ -602,6 +672,12 @@ def lets_dance_flux(
     ipadapter_kwargs_list={},
     id_emb=None,
     infinityou_guidance=None,
+    flex_condition=None,
+    flex_uncondition=None,
+    flex_control_stop_timestep=None,
+    step1x_llm_embedding=None,
+    step1x_mask=None,
+    step1x_reference_latents=None,
     tea_cache: TeaCache = None,
     **kwargs
 ):
@@ -652,6 +728,18 @@ def lets_dance_flux(
         controlnet_res_stack, controlnet_single_res_stack = controlnet(
             controlnet_frames, **controlnet_extra_kwargs
         )
+        
+    # Flex
+    if flex_condition is not None:
+        if timestep.tolist()[0] >= flex_control_stop_timestep:
+            hidden_states = torch.concat([hidden_states, flex_condition], dim=1)
+        else:
+            hidden_states = torch.concat([hidden_states, flex_uncondition], dim=1)
+            
+    # Step1x
+    if step1x_llm_embedding is not None:
+        prompt_emb, pooled_prompt_emb = step1x_connector(step1x_llm_embedding, timestep / 1000, step1x_mask)
+        text_ids = torch.zeros((1, prompt_emb.shape[1], 3), dtype=prompt_emb.dtype, device=prompt_emb.device)
 
     if image_ids is None:
         image_ids = dit.prepare_image_ids(hidden_states)
@@ -663,6 +751,14 @@ def lets_dance_flux(
 
     height, width = hidden_states.shape[-2:]
     hidden_states = dit.patchify(hidden_states)
+    
+    # Step1x
+    if step1x_reference_latents is not None:
+        step1x_reference_image_ids = dit.prepare_image_ids(step1x_reference_latents)
+        step1x_reference_latents = dit.patchify(step1x_reference_latents)
+        image_ids = torch.concat([image_ids, step1x_reference_image_ids], dim=-2)
+        hidden_states = torch.concat([hidden_states, step1x_reference_latents], dim=1)
+        
     hidden_states = dit.x_embedder(hidden_states)
 
     if entity_prompt_emb is not None and entity_masks is not None:
@@ -717,6 +813,11 @@ def lets_dance_flux(
 
     hidden_states = dit.final_norm_out(hidden_states, conditioning)
     hidden_states = dit.final_proj_out(hidden_states)
+    
+    # Step1x
+    if step1x_reference_latents is not None:
+        hidden_states = hidden_states[:, :hidden_states.shape[1] // 2]
+
     hidden_states = dit.unpatchify(hidden_states, height, width)
 
     return hidden_states

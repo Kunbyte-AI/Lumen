@@ -865,10 +865,10 @@ class WanImageEncoder(torch.nn.Module):
         # preprocess
         size = (self.model.image_size,) * 2
         videos = torch.cat([
-            F.interpolate(
+            F.interpolate( # mini-batch x channels x [optional depth] x [optional height] x width
                 u,
                 size=size,
-                mode='bicubic',
+                mode='bicubic', # 4D插值
                 align_corners=False) for u in videos
         ])
         videos = self.transforms.transforms[-1](videos.mul_(0.5).add_(0.5))

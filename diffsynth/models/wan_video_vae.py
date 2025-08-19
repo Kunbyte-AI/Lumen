@@ -713,8 +713,8 @@ class WanVideoVAE(nn.Module):
         weight = torch.zeros((1, 1, out_T, H // self.upsampling_factor, W // self.upsampling_factor), dtype=video.dtype, device=data_device)
         values = torch.zeros((1, 16, out_T, H // self.upsampling_factor, W // self.upsampling_factor), dtype=video.dtype, device=data_device)
 
-        # for h, h_, w, w_ in tqdm(tasks, desc="VAE encoding"): #me
-        for h, h_, w, w_ in tasks:
+        # for h, h_, w, w_ in tqdm(tasks, desc="VAE encoding"):
+        for h, h_, w, w_ in tasks: #*me
             hidden_states_batch = video[:, :, :, h:h_, w:w_].to(computation_device)
             hidden_states_batch = self.model.encode(hidden_states_batch, self.scale).to(data_device)
 
