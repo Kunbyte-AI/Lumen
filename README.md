@@ -52,12 +52,14 @@ We use the [Wan2.1-Fun-1.3B-Control](https://huggingface.co/alibaba-pai/Wan2.1-F
 You can download the weights of Lumen at [Kunbyte/Lumen](https://huggingface.co/Kunbyte/Lumen).
 
 ```
-modelscope download --model 'PAI/Wan2.1-Fun-1.3B-Control' --local_dir 'ckpt/Wan2.1-Fun-1.3B-Control'
+modelscope download --model PAI/Wan2.1-Fun-1.3B-Control --local_dir ckpt/Wan2.1-Fun-1.3B-Control
 or
+export HF_ENDPOINT=https://hf-mirror.com
 huggingface-cli download alibaba-pai/Wan2.1-Fun-1.3B-Control --local-dir ckpt/Wan2.1-Fun-1.3B-Control
 
-[optional] modelscope download --model 'PAI/Wan2.1-Fun-14B-Control' --local_dir './Wan2.1-Fun-14B-Control' --exclude 'Wan2.1_VAE*' 'models_t5*' 'models_clip*'
+[optional] modelscope download --model PAI/Wan2.1-Fun-14B-Control --local_dir ckpt/Wan2.1-Fun-14B-Control --exclude 'Wan2.1_VAE*' 'models_t5*' 'models_clip*'
 
+huggingface-cli download Kunbyte/Lumen --local-dir ckpt/Lumen
 
 ```
 
