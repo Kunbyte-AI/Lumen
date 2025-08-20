@@ -84,8 +84,8 @@ Lumen/
 ### Inference
 
 ```
-python app_lumen.py
 python infer_t2v.py
+python app_lumen.py
 ```
 
 
@@ -103,7 +103,7 @@ if you find our work helpful, please consider citing:
 @article{zeng2025lumen,
     title={Lumen: Consistent Video Relighting and Harmonious Background Replacement with Video Generative Models},
     author={Zeng, Jianshu and Liu, Yuxuan and Feng, Yutong and Miao, Chenxuan and Gao, Zixiang and Qu, Jiwang and Zhang, Jianzhang and Wang, Bin and Yuan, Kun},
-    journal={arXiv preprint arXiv:},
+    journal={arXiv preprint arXiv:2508.12945},
     year={2025},
     url={https://arxiv.org/abs/2508.12945}, 
 }

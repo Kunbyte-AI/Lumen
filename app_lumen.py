@@ -21,8 +21,8 @@ rmbg_model.to(device)
 rmbg_model.eval()
 
 model_manager = ModelManager(device="cpu") # 1.3b: device=cpu: uses 6G VRAM, device=device: uses 16G VRAM; about 1-2 min per video
+wan_dit_path = 'ckpt/Lumen/Lumen-T2V-1.3B-V1.0.ckpt'
 
-wan_dit_path = 'train_res/wan1.3b_zh/full_wc0.5_f1gt0.5_real1_2_zh_en_l_s/lightning_logs/version_0/checkpoints/step-step=30000.ckpt'
 if 'wan14b' in wan_dit_path.lower(): # 14B: uses about 36G, about 10 min per video 
     model_manager.load_models(
         [
@@ -114,7 +114,7 @@ def rmbg_mask(video_path, mask_path=None, progress=gr.Progress()):
 
 
 def video_relighting(fg_video_path, prompt, seed=-1, num_inference_steps=50, video_quality=7,
-                     progress=gr.Progress()):
+                    progress=gr.Progress()):
     """Relighting the foreground video base on the text """
     if not fg_video_path or not os.path.exists(fg_video_path):
         gr.Warning("Please extract foreground first!", duration = gr_info_duration)
@@ -126,7 +126,6 @@ def video_relighting(fg_video_path, prompt, seed=-1, num_inference_steps=50, vid
     try:
         fg_video = decord.VideoReader(uri=fg_video_path, width=width, height=height)
         fg_video = fg_video.get_batch(range(num_frames)).asnumpy().astype('uint8')
-        fg_v_pil = [Image.fromarray(frame) for frame in fg_video]
 
         progress(0.1, desc="relighting video...")
         relit_video = wan_pipe(
@@ -134,7 +133,7 @@ def video_relighting(fg_video_path, prompt, seed=-1, num_inference_steps=50, vid
             # negative_prompt = 'Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards',
             negative_prompt = '色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走',
             num_inference_steps=num_inference_steps,
-            control_video=fg_v_pil,
+            control_video=fg_video,
             height=height, width=width, num_frames=num_frames,
             seed=seed, tiled=True,
 
